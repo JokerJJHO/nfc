@@ -1,0 +1,120 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>專業 NFC 掃描器</title>
+    <style>
+        :root { --primary: #2563eb; --error: #dc2626; --success: #16a34a; }
+        body { font-family: -apple-system, sans-serif; padding: 20px; background: #f8fafc; color: #1e293b; }
+        .container { max-width: 500px; margin: 0 auto; background: white; padding: 2rem; border-radius: 1rem; box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1); }
+        h1 { font-size: 1.5rem; margin-bottom: 1rem; color: var(--primary); }
+        .status-box { padding: 10px; border-radius: 8px; margin-bottom: 1rem; font-weight: bold; text-align: center; }
+        .idle { background: #e2e8f0; }
+        .scanning { background: #dbeafe; color: var(--primary); animation: pulse 2s infinite; }
+        .btn-group { display: flex; gap: 10px; }
+        button { flex: 1; padding: 12px; border: none; border-radius: 8px; cursor: pointer; font-size: 1rem; transition: opacity 0.2s; background: var(--primary); color: white; }
+        button:disabled { background: #cbd5e1; cursor: not-allowed; }
+        #log { margin-top: 1.5rem; padding: 10px; background: #1e293b; color: #34d399; border-radius: 8px; font-family: monospace; font-size: 0.85rem; height: 200px; overflow-y: auto; }
+        @keyframes pulse { 0% { opacity: 1; } 50% { opacity: 0.6; } 100% { opacity: 1; } }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <h1>Web NFC 掃描器</h1>
+    <div id="status" class="status-box idle">點擊下方按鈕開始</div>
+    
+    <div class="btn-group">
+        <button id="btnScan">開始掃描</button>
+        <button id="btnWrite" style="background: #64748b;">寫入測試</button>
+    </div>
+
+    <div id="log">--- 系統日誌 ---</div>
+</div>
+
+<script>
+    const btnScan = document.getElementById('btnScan');
+    const btnWrite = document.getElementById('btnWrite');
+    const statusBox = document.getElementById('status');
+    const logElement = document.getElementById('log');
+
+    function log(msg, isError = false) {
+        const time = new Date().toLocaleTimeString();
+        const line = document.createElement('div');
+        line.style.color = isError ? '#f87171' : '#34d399';
+        line.textContent = `[${time}] ${msg}`;
+        logElement.prepend(line);
+    }
+
+    // 1. 環境檢查
+    if (!('NDEFReader' in window)) {
+        statusBox.innerText = "❌ 不支援 Web NFC";
+        statusBox.style.color = "red";
+        btnScan.disabled = btnWrite.disabled = true;
+        log("錯誤：請使用 Android Chrome 瀏覽器並確保在 HTTPS 環境下", true);
+    }
+
+    // 2. 優化讀取邏輯
+    btnScan.onclick = async () => {
+        try {
+            const ndef = new NDEFReader();
+            // 請求權限並啟動掃描
+            await ndef.scan();
+            
+            statusBox.innerText = "🔍 靠近 NFC 標籤中...";
+            statusBox.className = "status-box scanning";
+            log("掃描器已啟動...");
+
+            ndef.onreadingerror = () => {
+                log("讀取失敗：無法解析標籤。請確保標籤未損壞或未加密。", true);
+            };
+
+            ndef.onreading = ({ message, serialNumber }) => {
+                log(`✅ 偵測到標籤！序號: ${serialNumber}`);
+                
+                // 解析資料內容
+                for (const record of message.records) {
+                    let decodedData = "";
+                    if (record.recordType === "text") {
+                        const textDecoder = new TextDecoder(record.encoding);
+                        decodedData = textDecoder.decode(record.data);
+                    } else if (record.recordType === "url") {
+                        const textDecoder = new TextDecoder();
+                        decodedData = textDecoder.decode(record.data);
+                    } else {
+                        decodedData = `(非文字格式資料: ${record.recordType})`;
+                    }
+                    log(`內容 [${record.recordType}]: ${decodedData}`);
+                }
+            };
+
+        } catch (error) {
+            log(`啟動失敗: ${error.name}`, true);
+            if (error.name === "NotAllowedError") {
+                log("提示：使用者拒絕了 NFC 權限。", true);
+            } else if (error.name === "NotSupportedError") {
+                log("提示：本裝置沒有 NFC 硬體或已關閉。", true);
+            }
+            statusBox.innerText = "啟動失敗";
+            statusBox.className = "status-box idle";
+        }
+    };
+
+    // 3. 寫入範例
+    btnWrite.onclick = async () => {
+        try {
+            const ndef = new NDEFReader();
+            statusBox.innerText = "✍️ 請靠近標籤進行寫入...";
+            await ndef.write("Hello from GitHub Pages!");
+            log("✅ 成功將資料寫入標籤！");
+            statusBox.innerText = "寫入成功";
+            setTimeout(() => { statusBox.innerText = "點擊按鈕開始"; }, 2000);
+        } catch (error) {
+            log(`寫入失敗: ${error}`, true);
+        }
+    };
+</script>
+
+</body>
+</html>
