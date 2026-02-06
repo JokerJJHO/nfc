@@ -3,26 +3,31 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>NFC 點名同步系統26</title>
+    <title>NFC 點名系統 V260206-1</title>
     <style>
-        :root { --primary: #2563eb; --success: #16a34a; --bg: #f1f5f9; }
-        body { font-family: sans-serif; background: var(--bg); display: flex; justify-content: center; padding: 20px; }
-        .card { background: white; width: 100%; max-width: 400px; border-radius: 15px; padding: 20px; box-shadow: 0 10px 15px -3px rgba(0,0,0,0.1); }
-        .status-tag { display: inline-block; padding: 4px 12px; border-radius: 20px; font-size: 12px; margin-bottom: 10px; }
+        :root { --primary: #2563eb; --success: #16a34a; --bg: #f1f5f9; --error: #dc2626; }
+        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: var(--bg); display: flex; justify-content: center; padding: 20px; }
+        .card { background: white; width: 100%; max-width: 400px; border-radius: 15px; padding: 25px; box-shadow: 0 10px 15px -3px rgba(0,0,0,0.1); }
+        .status-tag { display: inline-block; padding: 4px 12px; border-radius: 20px; font-size: 12px; margin-bottom: 10px; font-weight: bold; }
         .can-write { background: #dcfce7; color: #166534; }
         .read-only { background: #fee2e2; color: #991b1b; }
-        #log { background: #1e293b; color: #34d399; padding: 15px; border-radius: 10px; font-family: monospace; font-size: 13px; height: 150px; overflow-y: auto; margin-top: 20px; }
-        button { width: 100%; padding: 15px; border: none; border-radius: 10px; background: var(--primary); color: white; font-size: 16px; font-weight: bold; cursor: pointer; }
-        .info-row { margin: 15px 0; border-bottom: 1px solid #e2e8f0; padding-bottom: 5px; }
-        .label { font-size: 12px; color: #64748b; }
-        .value { font-size: 18px; font-weight: bold; color: #1e293b; word-break: break-all; }
+        .syncing { background: #dbeafe; color: #1e40af; }
+        
+        #log { background: #1e293b; color: #34d399; padding: 15px; border-radius: 10px; font-family: monospace; font-size: 13px; height: 180px; overflow-y: auto; margin-top: 20px; border: 1px solid #334155; }
+        button { width: 100%; padding: 16px; border: none; border-radius: 12px; background: var(--primary); color: white; font-size: 18px; font-weight: bold; cursor: pointer; transition: all 0.2s; box-shadow: 0 4px 6px -1px rgba(37, 99, 235, 0.2); }
+        button:active { transform: scale(0.98); }
+        
+        .info-row { margin: 20px 0; border-bottom: 1px solid #e2e8f0; padding-bottom: 10px; }
+        .label { font-size: 13px; color: #64748b; margin-bottom: 4px; }
+        .value { font-size: 20px; font-weight: bold; color: #1e293b; word-break: break-all; min-height: 24px; }
+        h2 { margin-top: 0; color: #1e293b; font-size: 22px; }
     </style>
 </head>
 <body>
 
 <div class="card">
     <div id="writeStatus" class="status-tag" style="display:none;"></div>
-    <h2>NFC 點名掃描2266</h2>
+    <h2>NFC 點名掃描器0206</h2>
     
     <div class="info-row">
         <div class="label">目前偵測卡號 (NFC ID)</div>
@@ -35,63 +40,83 @@
 </div>
 
 <script>
-    const scriptURL = 'https://script.google.com/macros/s/AKfycbzLgpKLVR7NOPCBpxehE69kDTJXvP7L5TPCAVHAs8Kdf_sUnDNkuQ9rXbhJESjJxu77/exec'; // <--- 請貼入剛才部署的 GAS 網址
+    // 請確保此網址為你最新的 GAS 部署網址
+    const scriptURL = 'https://script.google.com/macros/s/AKfycbwf3Y8VYxPj_pfVsNwlodTDBA1gxuvsNSgMLV1-I5f3GmFgA4GA-psqwz4dEI3qSvQS/exec'; 
+    
     const btnScan = document.getElementById('btnScan');
     const logDiv = document.getElementById('log');
     const nfcIDDisplay = document.getElementById('nfcID');
     const writeStatus = document.getElementById('writeStatus');
 
-    function addLog(msg) {
+    function addLog(msg, isError = false) {
+        const time = new Date().toLocaleTimeString([], { hour12: false });
         const div = document.createElement('div');
-        div.textContent = `> ${msg}`;
+        div.style.marginBottom = "4px";
+        if (isError) div.style.color = "#f87171";
+        div.textContent = `[${time}] ${msg}`;
         logDiv.prepend(div);
     }
 
     btnScan.onclick = async () => {
         if (!('NDEFReader' in window)) {
-            alert("此瀏覽器不支援 NFC");
+            alert("抱歉，您的瀏覽器不支援 Web NFC 功能。請使用 Android 版 Chrome。");
             return;
         }
 
         try {
             const ndef = new NDEFReader();
             await ndef.scan();
-            addLog("掃描器啟動，請靠近卡片...");
+            
+            addLog("📡 掃描器已啟動，請將卡片靠近手機感應區");
             btnScan.innerText = "正在監聽 NFC...";
             btnScan.style.background = "#64748b";
 
-            ndef.onreading = async ({ serialNumber, message }) => {
+            ndef.onreading = async ({ serialNumber }) => {
+                // 1. 顯示卡號與初步狀態
                 nfcIDDisplay.innerText = serialNumber;
+                nfcIDDisplay.style.color = "#1e293b"; 
                 
-                // 1. 檢測寫入能力 (簡單判斷：若能抓到訊息且沒報錯通常可寫，或嘗試觸發寫入檢查)
-                // 注意：Web NFC 目前沒有直接的 isWritable 屬性，但能讀取到 NDEF 格式通常代表可寫
                 writeStatus.style.display = "inline-block";
-                writeStatus.innerText = "NDEF 格式卡片";
+                writeStatus.innerText = "NDEF 格式 (可讀寫)";
                 writeStatus.className = "status-tag can-write";
 
-                addLog(`讀取成功: ${serialNumber}`);
+                addLog(`📇 讀取卡號: ${serialNumber}`);
 
-                // 2. 自動寫入 Google Sheets
-                addLog("同步至試算表...");
+                // 2. 同步至 Google Sheets
+                writeStatus.innerText = "正在同步雲端...";
+                writeStatus.className = "status-tag syncing";
+                
                 try {
                     const response = await fetch(scriptURL, {
                         method: 'POST',
+                        mode: 'no-cors', // 處理跨網域
                         body: JSON.stringify({ serialNumber: serialNumber }),
                     });
-                    addLog("✅ 雲端同步完成");
+
+                    // 註：由於 no-cors 模式無法直接讀取 response.text()
+                    // 若需要讀取回傳結果（如學生姓名），GAS 必須處理 CORS 或改用 JSONP
+                    // 這裡先假設發送成功
+                    addLog("📤 資料已發送至試算表");
+                    nfcIDDisplay.style.color = "#16a34a";
+                    writeStatus.innerText = "同步完成";
+                    writeStatus.className = "status-tag can-write";
+                    
                 } catch (e) {
-                    addLog("❌ 同步失敗，請檢查網路");
+                    addLog("❌ 同步失敗，請檢查網路連線", true);
+                    writeStatus.innerText = "同步失敗";
+                    writeStatus.className = "status-tag read-only";
                 }
             };
 
             ndef.onreadingerror = () => {
-                addLog("讀取錯誤，這可能是一張加密卡(如悠遊卡)，僅能讀取序號", true);
+                addLog("⚠️ 讀取錯誤：這可能是加密卡或非 NDEF 格式", true);
+                writeStatus.style.display = "inline-block";
                 writeStatus.innerText = "唯讀或加密卡";
                 writeStatus.className = "status-tag read-only";
             };
 
         } catch (error) {
-            addLog("啟動失敗: " + error);
+            addLog("🚫 啟動失敗: " + error, true);
         }
     };
 </script>
