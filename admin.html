@@ -1,0 +1,133 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>NFC 學生卡綁定工具260222-1622</title>
+    <style>
+        :root { --primary: #2563eb; --success: #16a34a; --bg: #f8fafc; }
+        body { font-family: sans-serif; background: var(--bg); margin: 0; padding: 20px; }
+        .container { max-width: 500px; margin: 0 auto; }
+        
+        /* 班級導覽列 */
+        .class-nav { display: flex; gap: 10px; overflow-x: auto; padding: 10px 0; margin-bottom: 20px; }
+        .nav-btn { background: white; border: 1px solid #ddd; padding: 8px 15px; border-radius: 20px; white-space: nowrap; cursor: pointer; }
+        .nav-btn.active { background: var(--primary); color: white; border-color: var(--primary); }
+
+        /* 學生列表 */
+        .student-list { background: white; border-radius: 12px; box-shadow: 0 2px 4px rgba(0,0,0,0.05); }
+        .student-item { padding: 15px; border-bottom: 1px solid #f1f5f9; display: flex; justify-content: space-between; align-items: center; cursor: pointer; }
+        .student-item:last-child { border-bottom: none; }
+        .student-item.selected { background: #eff6ff; border-left: 4px solid var(--primary); }
+        .nfc-tag { font-family: monospace; font-size: 12px; color: #64748b; }
+
+        /* 底部控制區 */
+        .bottom-panel { position: fixed; bottom: 0; left: 0; right: 0; background: white; padding: 20px; border-top: 1px solid #e2e8f0; box-shadow: 0 -4px 6px -1px rgba(0,0,0,0.1); }
+        .btn-bind { width: 100%; padding: 15px; background: var(--primary); color: white; border: none; border-radius: 10px; font-weight: bold; font-size: 16px; }
+        .btn-bind:disabled { background: #cbd5e1; }
+        
+        #log { font-size: 12px; color: #ef4444; margin-top: 10px; text-align: center; }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <h2>NFC 卡片管理</h2>
+    
+    <div id="classNav" class="class-nav">載入班級中...</div>
+    
+    <div id="studentList" class="student-list">
+        <p style="padding:20px; text-align:center; color:#64748b;">請先選擇班級</p>
+    </div>
+
+    <div style="height: 120px;"></div> <div class="bottom-panel">
+        <div id="selectedInfo" style="margin-bottom:10px; font-weight:bold; color:#1e293b;">請選擇學生</div>
+        <button id="btnBind" class="btn-bind" disabled>請感應卡片 (尚未選擇)</button>
+        <div id="log"></div>
+    </div>
+</div>
+
+<script>
+    const scriptURL = 'https://script.google.com/macros/s/AKfycby-YiIaVsSUXyaaYYyb43lRiXiwbIEPJWyaFGZZaHIvejUCXIsiqZ52dIJfi7wUPPTw/exec';
+    let allStudents = [];
+    let selectedStudent = null;
+
+    // 1. 抓取學生名單
+    async function loadData() {
+        try {
+            const response = await fetch(scriptURL);
+            const data = await response.json();
+            allStudents = data.students;
+            renderClassNav();
+        } catch (e) { document.getElementById('log').innerText = "載入失敗：" + e; }
+    }
+
+    // 2. 生成班級按鈕 (抓前5碼)
+    function renderClassNav() {
+        const classes = [...new Set(allStudents.map(s => s.studentId.substring(0, 5)))];
+        const nav = document.getElementById('classNav');
+        nav.innerHTML = classes.map(c => `<button class="nav-btn" onclick="filterClass('${c}', this)">${c}</button>`).join('');
+    }
+
+    // 3. 篩選學生
+    function filterClass(className, btn) {
+        document.querySelectorAll('.nav-btn').forEach(b => b.classList.remove('active'));
+        btn.classList.add('active');
+        
+        const list = document.getElementById('studentList');
+        const students = allStudents.filter(s => s.studentId.startsWith(className));
+        
+        list.innerHTML = students.map(s => `
+            <div class="student-item" onclick="selectStudent('${s.studentId}', '${s.name}', this)">
+                <div>
+                    <div style="font-weight:bold;">${s.name}</div>
+                    <div style="font-size:12px; color:#94a3b8;">${s.studentId}</div>
+                </div>
+                <div class="nfc-tag">${s.nfcId || '無卡號'}</div>
+            </div>
+        `).join('');
+    }
+
+    // 4. 選擇學生
+    function selectStudent(id, name, el) {
+        document.querySelectorAll('.student-item').forEach(i => i.classList.remove('selected'));
+        el.classList.add('selected');
+        selectedStudent = { id, name };
+        document.getElementById('selectedInfo').innerText = `準備綁定：${name}`;
+        document.getElementById('btnBind').innerText = "正在監聽 NFC...";
+        document.getElementById('btnBind').disabled = false;
+        startNFC();
+    }
+
+    // 5. NFC 綁定邏輯
+    async function startNFC() {
+        if (!('NDEFReader' in window)) return alert("不支援 NFC");
+        
+        try {
+            const ndef = new NDEFReader();
+            await ndef.scan();
+            ndef.onreading = async ({ serialNumber }) => {
+                if (!selectedStudent) return;
+                
+                document.getElementById('log').innerText = "同步中...";
+                const res = await fetch(scriptURL, {
+                    method: 'POST',
+                    mode: 'no-cors',
+                    body: JSON.stringify({
+                        action: "bindNFC",
+                        studentId: selectedStudent.id,
+                        serialNumber: serialNumber
+                    })
+                });
+                
+                alert(`成功！已將卡號 ${serialNumber} 綁定給 ${selectedStudent.name}`);
+                location.reload(); // 重新整理更新名單
+            };
+        } catch (e) { document.getElementById('log').innerText = "NFC 錯誤: " + e; }
+    }
+
+    loadData();
+</script>
+
+</body>
+</html>
